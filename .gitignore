@@ -1,0 +1,45 @@
+# Go binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+
+# Go coverage
+coverage.out
+coverage.html
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+
+# Frontend (future)
+node_modules/
+.next/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Operating system
+.DS_Store
+Thumbs.db
