@@ -3,10 +3,13 @@ name: AlgoTrace CI
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+      - "feature/**"
 
   pull_request:
-    branches: ["main"]
+    branches:
+      - main
 
   workflow_dispatch:
 
@@ -56,12 +59,12 @@ jobs:
         run: docker pull python:3.12-alpine
 
       - name: Run Go unit tests
-        run: go test -v ./...
+        run: go test -v ./... -count=1
 
       - name: Run race detector
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./...
+        run: go test -race ./... -count=1
 
       - name: Run static analysis
         run: go vet ./...
@@ -71,6 +74,13 @@ jobs:
 
       - name: Display coverage
         run: go tool cover -func=coverage.out
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 7
 
   # --------------------------------------------------
   # PYTHON TRACING ENGINE
@@ -100,25 +110,56 @@ jobs:
             -v
 
   # --------------------------------------------------
-  # DOCKER TRACING RUNTIME
+  # DOCKER AND END-TO-END INTEGRATION
   # --------------------------------------------------
 
   docker-tests:
 
-    name: Docker Runtime Tests
+    name: Docker and End-to-End Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Verify Docker environment
+        run: |
+          docker version
+          docker info
+
+      - name: Pull Python runtime image
+        run: docker pull python:3.12-alpine
+
       - name: Build tracing image
         run: |
           docker build \
             -t algotrace-python:dev \
             ./internal/tracer
+
+      - name: Verify required Docker images
+        run: |
+          docker image inspect python:3.12-alpine
+          docker image inspect algotrace-python:dev
+
+      # ----------------------------------------------
+      # CONTAINER SMOKE TEST
+      # ----------------------------------------------
 
       - name: Test containerized tracer
         run: |
@@ -157,3 +198,63 @@ jobs:
 
           print("Docker tracing integration test passed.")
           PY
+
+      # ----------------------------------------------
+      # FULL INTEGRATION TEST SUITE
+      # ----------------------------------------------
+
+      - name: Run Docker integration and E2E tests
+        run: |
+          go test \
+            -tags=integration \
+            -p 1 \
+            -v \
+            ./... \
+            -count=1
+
+      - name: Run integration tests with race detector
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test \
+            -race \
+            -tags=integration \
+            -p 1 \
+            ./... \
+            -count=1
+
+      - name: Run integration static analysis
+        run: go vet -tags=integration ./...
+
+      # ----------------------------------------------
+      # CONTAINER CLEANUP VERIFICATION
+      # ----------------------------------------------
+
+      - name: Verify execution container cleanup
+        if: always()
+        run: |
+          containers=$(docker ps -a \
+            --filter "name=algotrace-" \
+            --format "{{.Names}}") || exit 1
+
+          if [ -n "$containers" ]; then
+            echo "Unexpected AlgoTrace containers found:"
+            echo "$containers"
+
+            docker ps -a \
+              --filter "name=algotrace-"
+
+            exit 1
+          fi
+
+          echo "All AlgoTrace execution containers cleaned up."
+
+      - name: Remove leftover execution containers
+        if: always()
+        run: |
+          containers=$(docker ps -aq \
+            --filter "name=algotrace-") || exit 1
+
+          if [ -n "$containers" ]; then
+            docker rm -f $containers
+          fi

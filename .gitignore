@@ -43,3 +43,10 @@ temp/
 # Operating system
 .DS_Store
 Thumbs.db
+
+# Generated execution traces
+/sample_trace.json
+
+# Generated test results
+/result.json
+/coverage.out
