@@ -1,0 +1,159 @@
+
+name: AlgoTrace CI
+
+on:
+  push:
+    branches: ["main"]
+
+  pull_request:
+    branches: ["main"]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  # --------------------------------------------------
+  # GO BACKEND
+  # --------------------------------------------------
+
+  go-tests:
+
+    name: Go Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Check Go formatting
+        run: |
+          files=$(gofmt -l .)
+
+          if [ -n "$files" ]; then
+            echo "The following files require formatting:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Pull Python runtime image
+        run: docker pull python:3.12-alpine
+
+      - name: Run Go unit tests
+        run: go test -v ./...
+
+      - name: Run race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./...
+
+      - name: Run static analysis
+        run: go vet ./...
+
+      - name: Generate coverage report
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: Display coverage
+        run: go tool cover -func=coverage.out
+
+  # --------------------------------------------------
+  # PYTHON TRACING ENGINE
+  # --------------------------------------------------
+
+  python-tests:
+
+    name: Python Tracer Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tracer tests
+        run: |
+          python -m unittest discover \
+            -s internal/tracer \
+            -p "test_*.py" \
+            -v
+
+  # --------------------------------------------------
+  # DOCKER TRACING RUNTIME
+  # --------------------------------------------------
+
+  docker-tests:
+
+    name: Docker Runtime Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build tracing image
+        run: |
+          docker build \
+            -t algotrace-python:dev \
+            ./internal/tracer
+
+      - name: Test containerized tracer
+        run: |
+          printf 'x = 10\ny = 20\nresult = x + y\nprint(result)\n' |
+          timeout 30s docker run --rm -i \
+            --network=none \
+            --memory=128m \
+            --cpus=0.5 \
+            --pids-limit=64 \
+            --read-only \
+            --tmpfs=/tmp:rw,noexec,nosuid,size=16m \
+            --user=65534:65534 \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            algotrace-python:dev > result.json
+
+      - name: Validate execution result
+        run: |
+          python3 - <<'PY'
+          import json
+
+          with open("result.json") as file:
+              result = json.load(file)
+
+          assert result["status"] == "completed"
+          assert result["stdout"].strip() == "30"
+          assert result["stderr"] == ""
+          assert result["error"] is None
+          assert result["total_steps"] > 0
+          assert result["stdout_truncated"] is False
+          assert result["stderr_truncated"] is False
+
+          final_event = result["events"][-1]
+
+          assert final_event["variables"]["result"] == 30
+
+          print("Docker tracing integration test passed.")
+          PY
