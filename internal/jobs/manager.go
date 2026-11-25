@@ -109,6 +109,10 @@ type Manager struct {
 	traceOrder []string
 	traceBytes int
 
+	// Job event subscriptions.
+	subscribers     map[string]map[chan JobEvent]struct{}
+	subscriberCount int
+
 	workerWG     sync.WaitGroup
 	shutdownOnce sync.Once
 	workersDone  chan struct{}
@@ -124,6 +128,10 @@ func NewManager(queueSize int) *Manager {
 		traces:      make(map[string][]byte),
 		queue:       make(chan string, queueSize),
 		workersDone: make(chan struct{}),
+
+		subscribers: make(
+			map[string]map[chan JobEvent]struct{},
+		),
 	}
 }
 
@@ -268,6 +276,7 @@ func (m *Manager) updateJob(
 	id string,
 	update func(*Job),
 ) {
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -282,6 +291,9 @@ func (m *Manager) updateJob(
 	j.UpdatedAt = time.Now()
 
 	m.store[id] = j
+
+	// Notify subscribers about the updated state.
+	m.publishJobLocked(j)
 }
 
 // --------------------------------------------------
@@ -631,6 +643,9 @@ func (m *Manager) finishJob(
 	job.UpdatedAt = time.Now()
 
 	m.store[id] = job
+
+	// Publish the final execution result.
+	m.publishJobLocked(job)
 }
 
 // --------------------------------------------------
@@ -671,8 +686,7 @@ func executeJobSafely(
 
 // --------------------------------------------------
 // GRACEFUL SHUTDOWN
-// --------------------------------------------------
-
+// -----------func (m *Manager) Shutdown(ctx context.Context) error {
 func (m *Manager) Shutdown(ctx context.Context) error {
 
 	m.shutdownOnce.Do(func() {
@@ -687,7 +701,16 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 		go func() {
 
+			// Allow workers to complete queued jobs
+			// and publish their terminal events.
 			m.workerWG.Wait()
+
+			m.mu.Lock()
+
+			// Release any remaining subscriptions.
+			m.closeSubscribersLocked()
+
+			m.mu.Unlock()
 
 			close(m.workersDone)
 		}()

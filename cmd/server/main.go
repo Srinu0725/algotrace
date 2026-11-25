@@ -16,6 +16,7 @@ import (
 
 	"github.com/Srinu0725/algotrace/internal/executor"
 	"github.com/Srinu0725/algotrace/internal/jobs"
+	"github.com/Srinu0725/algotrace/internal/websocket"
 	"github.com/google/uuid"
 )
 
@@ -620,6 +621,10 @@ func newHandler(
 	mux.HandleFunc(
 		"/jobs/",
 		jobHandler(manager),
+	)
+	mux.Handle(
+		"/ws/jobs/",
+		websocket.NewHandler(manager),
 	)
 
 	return mux
