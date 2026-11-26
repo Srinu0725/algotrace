@@ -94,6 +94,14 @@ export interface TraceError {
   column?: number
   function: string
 }
+export interface ObjectReference {
+  $ref: string
+}
+
+export interface ObjectSnapshot {
+  type: string
+  attributes: Record<string, JsonValue>
+}
 
 export interface TraceEvent {
   step: number
@@ -101,14 +109,23 @@ export interface TraceEvent {
   event: string
   function: string
   depth: number
+
   call_stack: string[]
 
   variables?: Record<string, JsonValue>
   arguments?: Record<string, JsonValue>
 
   changes?: VariableChange[]
+
   return_value?: JsonValue
+
   exception?: TraceException
+
+  references?: Record<string, string>
+
+  objects?: Record<string, ObjectSnapshot>
+
+  objects_truncated?: boolean
 }
 
 export interface TraceResult {

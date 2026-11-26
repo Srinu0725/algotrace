@@ -4,8 +4,12 @@ WORKDIR /app
 
 COPY tracer.py /app/tracer.py
 COPY runner.py /app/runner.py
+COPY object_tracker.py /app/object_tracker.py
 
-RUN chmod 444 /app/tracer.py /app/runner.py
+RUN chmod 444 \
+    /app/tracer.py \
+    /app/runner.py \
+    /app/object_tracker.py
 
 USER 65534:65534
 

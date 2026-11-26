@@ -10,7 +10,7 @@ import { useExecutionStore } from '../../store/executionStore'
 import ArrayVisualizer from './ArrayVisualizer'
 import RecursionTree from './RecursionTree'
 import CallStackVisualizer from './CallStackVisualizer'
-
+import ObjectVisualizer from './ObjectVisualizer'
 import PlaybackControls from '../playback/PlaybackControls'
 
 import { buildCallTree } from '../../utils/traceTree'
@@ -222,6 +222,23 @@ export default function VisualizationPanel() {
         {callTree.nodes.length > 0 && (
           <CallStackVisualizer
             tree={callTree}
+          />
+        )}
+
+        {/* Object Identity and Reference Visualization */}
+
+        {(event.objects || event.objects_truncated) && (
+          <ObjectVisualizer
+            key={jobId}
+            references={event.references ?? {}}
+            objects={event.objects ?? {}}
+            previousReferences={
+              events[currentStep - 1]?.references
+            }
+            previousObjects={
+              events[currentStep - 1]?.objects
+            }
+            truncated={event.objects_truncated}
           />
         )}
 

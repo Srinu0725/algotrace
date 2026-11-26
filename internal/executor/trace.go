@@ -26,6 +26,13 @@ type TraceException struct {
 	Message string `json:"message"`
 }
 
+// ObjectSnapshot represents a Python object observed
+// during a recorded execution step.
+type ObjectSnapshot struct {
+	Type       string                     `json:"type"`
+	Attributes map[string]json.RawMessage `json:"attributes"`
+}
+
 // TraceEvent represents a single recorded execution step.
 type TraceEvent struct {
 	Step     int    `json:"step"`
@@ -44,6 +51,15 @@ type TraceEvent struct {
 	ReturnValue json.RawMessage `json:"return_value,omitempty"`
 
 	Exception *TraceException `json:"exception,omitempty"`
+
+	// Variable-to-object references.
+	References map[string]string `json:"references,omitempty"`
+
+	// Object identity and attribute snapshots.
+	Objects map[string]ObjectSnapshot `json:"objects,omitempty"`
+
+	// Indicates that object capture was limited.
+	ObjectsTruncated bool `json:"objects_truncated,omitempty"`
 }
 
 // TraceResult represents the complete Python runner response.

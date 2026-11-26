@@ -3,7 +3,7 @@ import sys
 import json
 import types
 import math
-
+from object_tracker import ObjectTracker
 
 # --------------------------------------------------
 # TRACE SAFETY LIMITS
@@ -274,6 +274,7 @@ def trace_execution(code):
     frame_states = {}
 
     call_stack = []
+    object_tracker = ObjectTracker()
 
     limit_reached = None
     trace_bytes = 0
@@ -283,7 +284,11 @@ def trace_execution(code):
     # EVENT RECORDER
     # --------------------------------------------------
 
-    def record_event(event_data):
+        # --------------------------------------------------
+    # EVENT RECORDER
+    # --------------------------------------------------
+
+    def record_event(event_data, frame):
 
         nonlocal trace_bytes, limit_reached
 
@@ -292,6 +297,14 @@ def trace_execution(code):
             limit_reached = "maximum_trace_steps_exceeded"
 
             raise TraceLimitExceeded()
+
+        # Capture object identities and relationships.
+        object_snapshot = object_tracker.snapshot(
+            frame.f_locals
+        )
+
+        # Add object information to the existing event.
+        event_data.update(object_snapshot)
 
         encoded = json.dumps(
             event_data,
@@ -312,7 +325,13 @@ def trace_execution(code):
 
         trace_bytes += event_size
 
+        
+
     # --------------------------------------------------
+    # TRACE CALLBACK
+    # --------------------------------------------------
+
+        # --------------------------------------------------
     # TRACE CALLBACK
     # --------------------------------------------------
 
@@ -360,7 +379,127 @@ def trace_execution(code):
                 "depth": len(call_stack) - 1,
                 "call_stack": call_stack.copy(),
                 "arguments": capture_variables(frame)
-            })
+            }, frame)
+
+            return tracer
+
+        # ----------------------------------------------
+        # LINE EXECUTION
+        # ----------------------------------------------
+
+        if event == "line":
+
+            previous_variables = frame_states.setdefault(
+                frame_id, {}
+            )
+
+            current_variables = capture_variables(frame)
+
+            changes = detect_changes(
+                previous_variables,
+                current_variables
+            )
+
+            record_event({
+                "step": len(events) + 1,
+                "line": frame.f_lineno,
+                "event": "line",
+                "function": function_name,
+                "depth": max(0, len(call_stack) - 1),
+                "call_stack": call_stack.copy(),
+                "variables": current_variables,
+                "changes": changes
+            }, frame)
+
+            frame_states[frame_id] = current_variables
+
+        # ----------------------------------------------
+        # EXCEPTION EVENT
+        # ----------------------------------------------
+
+        elif event == "exception":
+
+            exception_type, exception_value, _ = arg
+
+            current_variables = capture_variables(frame)
+
+            record_event({
+                "step": len(events) + 1,
+                "line": frame.f_lineno,
+                "event": "exception",
+                "function": function_name,
+                "depth": max(0, len(call_stack) - 1),
+                "call_stack": call_stack.copy(),
+                "variables": current_variables,
+                "exception": {
+                    "type": exception_type.__name__,
+                    "message": exception_message(
+                        exception_value
+                    )
+                }
+            }, frame)
+
+        # ----------------------------------------------
+        # FUNCTION RETURN
+        # ----------------------------------------------
+
+        elif event == "return":
+
+            previous_variables = frame_states.get(
+                frame_id, {}
+            )
+
+            current_variables = capture_variables(frame)
+
+            changes = detect_changes(
+                previous_variables,
+                current_variables
+            )
+
+            record_event({
+                "step": len(events) + 1,
+                "line": frame.f_lineno,
+                "event": "function_return",
+                "function": function_name,
+                "depth": max(0, len(call_stack) - 1),
+                "call_stack": call_stack.copy(),
+                "return_value": serialize_value(arg),
+                "variables": current_variables,
+                "changes": changes
+            }, frame)
+
+            frame_states.pop(frame_id, None)
+
+            if call_stack:
+                call_stack.pop()
+
+        return tracer
+
+        # ----------------------------------------------
+        # FUNCTION CALL
+        # ----------------------------------------------
+
+        if event == "call":
+
+            if len(call_stack) - 1 >= MAX_CALL_DEPTH:
+
+                limit_reached = "maximum_call_depth_exceeded"
+
+                raise TraceLimitExceeded()
+
+            frame_states[frame_id] = {}
+
+            call_stack.append(function_name)
+
+            record_event({
+                "step": len(events) + 1,
+                "line": frame.f_lineno,
+                "event": "function_call",
+                "function": function_name,
+                "depth": len(call_stack) - 1,
+                "call_stack": call_stack.copy(),
+                "arguments": capture_variables(frame)
+            },frame)
 
             return tracer
 
