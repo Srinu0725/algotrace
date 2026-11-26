@@ -1,16 +1,19 @@
+import { useMemo } from 'react'
 
 import {
   Workflow,
   LoaderCircle,
 } from 'lucide-react'
 
-import {
-  useExecutionStore,
-} from '../../store/executionStore'
+import { useExecutionStore } from '../../store/executionStore'
 
 import ArrayVisualizer from './ArrayVisualizer'
+import RecursionTree from './RecursionTree'
+import CallStackVisualizer from './CallStackVisualizer'
 
 import PlaybackControls from '../playback/PlaybackControls'
+
+import { buildCallTree } from '../../utils/traceTree'
 
 export default function VisualizationPanel() {
   const {
@@ -20,161 +23,214 @@ export default function VisualizationPanel() {
     currentStep,
     isExecuting,
     jobId,
+    setStep,
   } = useExecutionStore()
 
   const events = trace?.events ?? []
 
   const event = events[currentStep]
 
+  // Reconstruct function calls up to the current step.
+  const callTree = useMemo(
+    () =>
+      buildCallTree(
+        trace?.events ?? [],
+        currentStep,
+      ),
+    [trace, currentStep],
+  )
+
+  // Empty or loading state.
   if (!event) {
     return (
       <div className="visualization-panel">
         <div className="visualization-empty">
-          <div className="visualization-icon">
-            {isExecuting ? (
+          {isExecuting ? (
+            <>
               <LoaderCircle
-                size={36}
+                size={42}
                 className="loading-spinner"
               />
-            ) : (
-              <Workflow size={36} />
-            )}
-          </div>
 
-          <h2>
-            {isExecuting
-              ? 'Executing your code'
-              : status === 'idle'
-                ? 'See your code come to life'
-                : 'No execution steps available'}
-          </h2>
+              <h3>Executing your code</h3>
 
-          <p>
-            {error ??
-              trace?.error?.message ??
-              (isExecuting
-                ? 'Generating execution trace...'
-                : status === 'idle'
-                  ? 'Click Visualize to begin.'
-                  : `Execution status: ${status}`)}
-          </p>
+              <p>
+                Generating execution trace...
+              </p>
+            </>
+          ) : (
+            <>
+              <Workflow size={48} />
+
+              <h3>
+                {trace
+                  ? 'No execution steps available'
+                  : 'Ready to visualize'}
+              </h3>
+
+              <p>
+                Write your Python code and click
+                Visualize to explore its execution.
+              </p>
+
+              {error && (
+                <p className="console-stderr">
+                  {error}
+                </p>
+              )}
+            </>
+          )}
         </div>
       </div>
     )
   }
 
+  // Merge arguments and local variables.
   const variables = {
-    ...(event.arguments ?? {}),
-    ...(event.variables ?? {}),
+    ...event.arguments,
+    ...event.variables,
   }
 
   const changes = event.changes ?? []
 
   const changedVariables = new Set(
-    changes.map((change) => change.name),
+    changes.map(change => change.name),
   )
 
-  const arrays = Object.entries(
+  const arrayVariables = Object.entries(
     variables,
-  ).filter(
-    ([, value]) => Array.isArray(value),
-  )
+  ).filter(([, value]) => Array.isArray(value))
 
   const scalarVariables = Object.entries(
     variables,
-  ).filter(
-    ([, value]) => !Array.isArray(value),
-  )
+  ).filter(([, value]) => !Array.isArray(value))
 
   return (
     <div className="visualization-layout">
-      {/* Scrollable visualization area */}
-
       <div className="trace-workspace">
-        <div className="trace-summary">
-          <span
-            className={`trace-status status-${status}`}
-          >
-            {status.replaceAll('_', ' ')}
-          </span>
 
-          <span>
-            {events.length} execution steps
+        {/* Execution summary */}
+
+        <div className="trace-summary">
+          <div>
+            <h3>Execution Trace</h3>
+
+            <p>
+              {events.length} execution steps
+            </p>
+          </div>
+
+          <span className="trace-status">
+            {status.replaceAll('_', ' ')}
           </span>
         </div>
 
         {/* Execution errors */}
 
         {error && (
-          <div className="trace-card console-stderr">
-            {error}
-          </div>
+          <section className="trace-card">
+            <h3>Execution Error</h3>
+
+            <pre className="console-stderr">
+              {error}
+            </pre>
+          </section>
         )}
 
         {trace?.error && (
-          <div className="trace-card console-stderr">
-            <strong>
-              {trace.error.type}
-            </strong>
+          <section className="trace-card">
+            <h3>{trace.error.type}</h3>
 
-            <p>
+            <pre className="console-stderr">
               {trace.error.message}
-            </p>
-          </div>
+            </pre>
+
+            {trace.error.line != null && (
+              <p>
+                Source line: {trace.error.line}
+              </p>
+            )}
+          </section>
         )}
 
         {trace?.limit && (
-          <div className="trace-card">
-            <h3>Trace limit reached</h3>
+          <section className="trace-card">
+            <h3>Execution Limit Reached</h3>
 
-            <p className="muted">
-              {trace.limit}
+            <p>{trace.limit}</p>
+          </section>
+        )}
+
+        {/* Current execution state */}
+
+        <section className="trace-card">
+          <h3>Execution State</h3>
+
+          <div className="execution-state-grid">
+            <div>
+              <span>Step</span>
+
+              <strong>
+                {currentStep + 1}/{events.length}
+              </strong>
+            </div>
+
+            <div>
+              <span>Source Line</span>
+
+              <strong>{event.line}</strong>
+            </div>
+
+            <div>
+              <span>Event</span>
+
+              <strong>
+                {event.event.replaceAll('_', ' ')}
+              </strong>
+            </div>
+
+            <div>
+              <span>Depth</span>
+
+              <strong>{event.depth}</strong>
+            </div>
+          </div>
+
+          {event.event === 'line' && (
+            <p className="trace-event-note">
+              Next line to execute: {event.line}.
+              Showing state before execution.
             </p>
-          </div>
+          )}
+        </section>
+
+        {/* NEW: Function call tree */}
+
+        {callTree.nodes.length > 0 && (
+          <RecursionTree
+            key={jobId}
+            tree={callTree}
+            onSelectStep={setStep}
+          />
         )}
 
-        {/* Compact execution state */}
+        {/* NEW: Dynamic call stack */}
 
-        <div className="execution-state-compact">
-          <div>
-            <span>Step</span>
-            <strong>{event.step}</strong>
-          </div>
-
-          <div>
-            <span>Source line</span>
-            <strong>{event.line}</strong>
-          </div>
-
-          <div>
-            <span>Event</span>
-            <strong>
-              {event.event.replaceAll('_', ' ')}
-            </strong>
-          </div>
-
-          <div>
-            <span>Depth</span>
-            <strong>{event.depth}</strong>
-          </div>
-        </div>
-
-        {event.event === 'line' && (
-          <div className="execution-line-info">
-            Next line to execute: {event.line}.
-            Showing state before execution.
-          </div>
+        {callTree.nodes.length > 0 && (
+          <CallStackVisualizer
+            tree={callTree}
+          />
         )}
 
-        {/* Graphical arrays */}
+        {/* Array visualizations */}
 
-        {arrays.map(([name, value]) => {
+        {arrayVariables.map(([name, value]) => {
           if (!Array.isArray(value)) {
             return null
           }
 
           return (
-            <div
+            <section
               className="trace-card"
               key={name}
             >
@@ -183,20 +239,16 @@ export default function VisualizationPanel() {
                 values={value}
                 changes={changes}
               />
-            </div>
+            </section>
           )
         })}
 
-        {/* Other variables */}
+        {/* Scalar variables */}
 
-        <div className="trace-card">
-          <h3>Variables</h3>
+        {scalarVariables.length > 0 && (
+          <section className="trace-card">
+            <h3>Variables</h3>
 
-          {scalarVariables.length === 0 ? (
-            <p className="muted">
-              No other variables in this snapshot.
-            </p>
-          ) : (
             <div className="variable-grid">
               {scalarVariables.map(
                 ([name, value]) => (
@@ -204,62 +256,60 @@ export default function VisualizationPanel() {
                     key={name}
                     className={`variable-tile ${
                       changedVariables.has(name)
-                        ? 'variable-tile-changed'
+                        ? 'variable-changed'
                         : ''
                     }`}
                   >
                     <span>{name}</span>
 
-                    <strong>
+                    <code>
                       {JSON.stringify(value)}
-                    </strong>
+                    </code>
                   </div>
                 ),
               )}
             </div>
-          )}
-        </div>
+          </section>
+        )}
 
-        {/* Call stack */}
+        {/* Basic stack fallback */}
 
-        <div className="trace-card">
-          <h3>Call Stack</h3>
+        {callTree.nodes.length === 0 && (
+          <section className="trace-card">
+            <h3>Call Stack</h3>
 
-          <p className="muted">
-            Current function: {event.function}
-          </p>
+            <div className="trace-details">
+              <span>Current Function</span>
 
-          {event.call_stack?.map(
-            (frame, index) => (
-              <div
-                className="stack-frame"
-                key={`${frame}-${index}`}
-              >
-                {index + 1}. {frame}
-              </div>
-            ),
-          )}
-        </div>
+              <strong>{event.function}</strong>
+            </div>
+
+            {(event.call_stack ?? []).map(
+              (frame, index) => (
+                <div
+                  className="stack-frame"
+                  key={`${frame}-${index}`}
+                >
+                  {frame}
+                </div>
+              ),
+            )}
+          </section>
+        )}
 
         {/* Variable changes */}
 
-        <div className="trace-card">
-          <h3>Variable Changes</h3>
+        {changes.length > 0 && (
+          <section className="trace-card">
+            <h3>Variable Changes</h3>
 
-          {changes.length === 0 ? (
-            <p className="muted">
-              No variable changes in this step.
-            </p>
-          ) : (
-            changes.map((change, index) => (
+            {changes.map((change, index) => (
               <div
-                className="change-row"
+                className="variable-change-row"
                 key={`${change.name}-${index}`}
               >
-                <div className="change-header">
-                  <strong>
-                    {change.name}
-                  </strong>
+                <div>
+                  <strong>{change.name}</strong>
 
                   <span>
                     {change.type.replaceAll(
@@ -270,37 +320,49 @@ export default function VisualizationPanel() {
                 </div>
 
                 {change.old_value !== undefined && (
-                  <div className="change-old">
-                    {JSON.stringify(
-                      change.old_value,
-                    )}
+                  <div>
+                    <span>Previous</span>
+
+                    <code>
+                      {JSON.stringify(
+                        change.old_value,
+                      )}
+                    </code>
                   </div>
                 )}
 
                 {change.new_value !== undefined && (
-                  <div className="change-new">
-                    {JSON.stringify(
-                      change.new_value,
-                    )}
+                  <div>
+                    <span>Current</span>
+
+                    <code>
+                      {JSON.stringify(
+                        change.new_value,
+                      )}
+                    </code>
                   </div>
                 )}
 
                 {change.value !== undefined && (
-                  <div className="change-new">
-                    {JSON.stringify(
-                      change.value,
-                    )}
+                  <div>
+                    <span>Value</span>
+
+                    <code>
+                      {JSON.stringify(
+                        change.value,
+                      )}
+                    </code>
                   </div>
                 )}
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </section>
+        )}
 
-        {/* Return value */}
+        {/* Function return value */}
 
         {event.return_value !== undefined && (
-          <div className="trace-card">
+          <section className="trace-card">
             <h3>Return Value</h3>
 
             <pre className="trace-json">
@@ -310,21 +372,29 @@ export default function VisualizationPanel() {
                 2,
               )}
             </pre>
-          </div>
+          </section>
         )}
 
-        {/* Exception */}
+        {/* Exception information */}
 
         {event.exception && (
-          <div className="trace-card console-stderr">
-            <h3>
-              {event.exception.type}
-            </h3>
+          <section className="trace-card">
+            <h3>Exception</h3>
 
-            <p>
-              {event.exception.message}
-            </p>
-          </div>
+            <div className="trace-details">
+              <span>Type</span>
+
+              <strong>
+                {event.exception.type}
+              </strong>
+
+              <span>Message</span>
+
+              <strong className="console-stderr">
+                {event.exception.message}
+              </strong>
+            </div>
+          </section>
         )}
       </div>
 

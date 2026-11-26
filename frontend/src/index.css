@@ -1174,3 +1174,311 @@ button:focus-visible,
     transition: none;
   }
 }
+
+
+/* =========================================
+   RECURSION TREE & CALL STACK
+========================================= */
+
+.recursion-card,
+.callstack-card {
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.recursion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.recursion-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #60a5fa;
+}
+
+.recursion-title h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.recursion-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recursion-zoom span {
+  color: #94a3b8;
+  font-size: 11px;
+  min-width: 38px;
+  text-align: center;
+}
+
+.recursion-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.recursion-stats span,
+.callstack-depth {
+  padding: 5px 10px;
+  border: 1px solid #263244;
+  border-radius: 6px;
+  background: #111b29;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.recursion-canvas {
+  width: 100%;
+  min-height: 220px;
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid #263244;
+  border-radius: 9px;
+  background-color: #0b1018;
+  background-image:
+    radial-gradient(
+      #253044 1px,
+      transparent 1px
+    );
+  background-size: 20px 20px;
+}
+
+.recursion-canvas svg {
+  display: block;
+  max-width: none;
+  flex-shrink: 0;
+}
+
+.recursion-edge {
+  fill: none;
+  stroke: #475569;
+  stroke-width: 1.7;
+}
+
+.recursion-edge.returned {
+  stroke: #34d399;
+  stroke-opacity: 0.6;
+}
+
+.recursion-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.recursion-node rect {
+  fill: #142033;
+  stroke: #3b82f6;
+  stroke-width: 1.5;
+  transition:
+    fill 180ms ease,
+    stroke 180ms ease;
+}
+
+.recursion-node:hover rect,
+.recursion-node:focus-visible rect {
+  stroke-width: 3;
+}
+
+.recursion-node.current rect {
+  fill: #352714;
+  stroke: #f59e0b;
+  stroke-width: 2;
+}
+
+.recursion-node.returned rect {
+  fill: #102b24;
+  stroke: #34d399;
+}
+
+.recursion-node.unwound rect {
+  fill: #252a35;
+  stroke: #94a3b8;
+}
+
+.recursion-node-label {
+  fill: #e2e8f0;
+  font-size: 12px;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.recursion-node-status {
+  fill: #94a3b8;
+  font-size: 11px;
+}
+
+.recursion-node.current
+.recursion-node-status {
+  fill: #fbbf24;
+}
+
+.recursion-node.returned
+.recursion-node-status {
+  fill: #34d399;
+}
+
+.recursion-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: 15px;
+}
+
+.recursion-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.recursion-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legend-current {
+  background: #f59e0b;
+}
+
+.legend-waiting {
+  background: #3b82f6;
+}
+
+.legend-returned {
+  background: #34d399;
+}
+
+.legend-unwound {
+  background: #94a3b8;
+}
+
+.recursion-hint,
+.recursion-limit {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.recursion-limit {
+  color: #fbbf24;
+}
+
+/* Call stack */
+
+.callstack-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #263244;
+  border-radius: 8px;
+  background: #0b1018;
+}
+
+.callstack-direction {
+  padding: 5px;
+  color: #64748b;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+}
+
+.callstack-frame {
+  padding: 13px;
+  border: 1px solid #30425e;
+  border-left: 3px solid #3b82f6;
+  border-radius: 7px;
+  background: #131d2c;
+}
+
+.callstack-frame.active {
+  border-color: #b7791f;
+  border-left-color: #f59e0b;
+  background: #251e14;
+}
+
+.callstack-frame-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.callstack-frame-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #e2e8f0;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.callstack-frame-header span {
+  color: #94a3b8;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.callstack-frame.active
+.callstack-frame-header span {
+  color: #fbbf24;
+}
+
+.callstack-variables {
+  display: grid;
+  grid-template-columns:
+    repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.callstack-variable {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #263244;
+  border-radius: 5px;
+  background: #0b1018;
+}
+
+.callstack-variable span {
+  display: block;
+  color: #94a3b8;
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+
+.callstack-variable code {
+  display: block;
+  color: #60a5fa;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.callstack-empty {
+  padding: 25px;
+  border: 1px dashed #263244;
+  border-radius: 8px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recursion-node rect {
+    transition: none;
+  }
+}
