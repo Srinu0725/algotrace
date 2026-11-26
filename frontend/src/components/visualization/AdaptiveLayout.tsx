@@ -1,4 +1,3 @@
-
 import {
   useLayoutEffect,
   useRef,
@@ -6,6 +5,7 @@ import {
 } from 'react'
 
 import type { ReactNode } from 'react'
+import './adaptive-phase15.css'
 
 import {
   Pin,
@@ -63,7 +63,9 @@ export default function AdaptiveLayout({
   const visibleItems =
     mode === 'focus'
       ? focusedItem
-        ? [focusedItem]
+        ? [focusedItem, ...items.filter(item =>
+            item.id !== focusedItem.id && pinned.includes(item.id),
+          )]
         : []
       : items
 
@@ -233,6 +235,7 @@ export default function AdaptiveLayout({
                   'adaptive-card',
                   isActive ? 'is-active' : '',
                   isPinned ? 'is-pinned' : '',
+                  mode === 'focus' && item.id === focusedItem?.id ? 'is-focused' : '',
                 ].join(' ')}
               >
                 <header className="adaptive-card-header">
@@ -271,7 +274,7 @@ export default function AdaptiveLayout({
                         toggleFocus(item.id)
                       }
                     >
-                      {mode === 'focus'
+                      {mode === 'focus' && item.id === focusedItem?.id
                         ? <Minimize2 size={14} />
                         : <Maximize2 size={14} />}
                     </button>

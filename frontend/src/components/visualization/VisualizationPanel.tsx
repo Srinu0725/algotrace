@@ -1,4 +1,4 @@
-
+import BinaryTreeVisualizer from './BinaryTreeVisualizer'
 import { useMemo } from 'react'
 
 import {
@@ -20,6 +20,8 @@ import type {
   VisualizationItem,
 } from './AdaptiveLayout'
 
+import { seekFromVisualization } from '../../hooks/usePlayback'
+
 import PlaybackControls from '../playback/PlaybackControls'
 
 import {
@@ -33,7 +35,10 @@ import {
 import {
   extractRecursiveTree,
 } from '../../utils/recursiveCalls'
-
+import {
+  buildVisualizationTimeline,
+  getTimelineFrame,
+} from '../../utils/visualizationTimeline'
 export default function VisualizationPanel() {
   const trace = useExecutionStore(s => s.trace)
   const jobId = useExecutionStore(s => s.jobId)
@@ -48,9 +53,6 @@ export default function VisualizationPanel() {
     s => s.isExecuting,
   )
 
-  const setStep = useExecutionStore(
-    s => s.setStep,
-  )
 
   const event = isExecuting
     ? undefined
@@ -74,6 +76,10 @@ export default function VisualizationPanel() {
     [trace, currentStep],
   )
 
+  const fullRecursiveTree = useMemo(() => extractRecursiveTree(
+    buildCallTree(trace?.events ?? [], (trace?.events.length ?? 0) - 1),
+  ), [trace])
+
   const recursiveTree = useMemo(
     () => extractRecursiveTree(callTree),
     [callTree],
@@ -83,60 +89,35 @@ export default function VisualizationPanel() {
   // the last meaningful activity at this step.
   // This also works when seeking backwards.
 
-  const activityHistory = useMemo(() => {
-    const order = new Map<string, number>()
+  const timeline = useMemo(
+  () => buildVisualizationTimeline(
+    trace?.events ?? [],
+  ),
+  [trace],
+)
 
-    let activeId: string | null = null
+const timelineFrame = getTimelineFrame(
+  timeline,
+  currentStep,
+)
 
-    if (!trace) {
-      return { order, activeId }
-    }
-
-    for (
-      let index = 0;
-      index <= currentStep;
-      index++
-    ) {
-      const current = trace.events[index]
-
-      if (!current) continue
-
-      const detected = detectStructures(
-        current,
-        trace.events[index - 1],
-      )
-
-      for (const structure of detected) {
-        if (!order.has(structure.id)) {
-          order.set(structure.id, order.size)
-        }
-      }
-
-      const changed = detected.filter(
-        structure =>
-          structure.activity !== 'unchanged',
-      )
-
-      const specialized = changed.filter(
-        structure => structure.type !== 'object',
-      )
-
-      const candidates =
-        specialized.length > 0
-          ? specialized
-          : changed
-
-      if (candidates.length > 0) {
-        activeId =
-          candidates.find(
-            item => item.id === activeId,
-          )?.id ??
-          candidates[0].id
+  const retained = useMemo(() => {
+    const result = new Map<string, { structure: ReturnType<typeof detectStructures>[number]; step: number }>()
+    const seen = new Set(structures.map(item => item.id))
+    for (const step of timelineFrame?.retainedSteps ?? []) {
+      const snapshot = trace?.events[step]
+      if (!snapshot) continue
+      for (const structure of detectStructures(snapshot, trace?.events[step - 1])) {
+        if (structure.type === 'object' || structure.type === 'recursion' || seen.has(structure.id)) continue
+        // Do not duplicate overlapping linked-list components.
+        if (structure.type === 'linked-list' && [...structures, ...Array.from(result.values(), item => item.structure)].some(item => item.type === 'linked-list' && item.nodes.some(node => structure.nodes.some(other => other.id === node.id)))) continue
+        if (structure.type === 'binary-tree' && [...structures, ...Array.from(result.values(), item => item.structure)].some(item => item.type === 'binary-tree' && item.nodes.some(node => structure.nodes.some(other => other.id === node.id)))) continue
+        seen.add(structure.id)
+        result.set(structure.id, { structure, step })
       }
     }
-
-    return { order, activeId }
-  }, [trace, currentStep])
+    return result
+  }, [structures, timelineFrame, trace])
 
   if (!event) {
     return (
@@ -188,18 +169,21 @@ export default function VisualizationPanel() {
 
   const items: VisualizationItem[] = []
 
-  for (const structure of structures) {
+  for (const structure of [...structures, ...Array.from(retained.values(), item => ({ ...item.structure, activity: 'unchanged' as const }))]) {
+    const retainedStep = retained.get(structure.id)?.step
+    const label = retainedStep === undefined ? '' : ` (last observed at step ${retainedStep + 1})`
+    const structureChanges = retainedStep === undefined ? changes : []
     switch (structure.type) {
       case 'array':
         items.push({
           id: structure.id,
-          title: `Array — ${structure.name}`,
+          title: `Array — ${structure.name}${label}`,
           activity: structure.activity,
           content: (
             <ArrayVisualizer
               name={structure.name}
               values={structure.values}
-              changes={changes}
+              changes={structureChanges}
             />
           ),
         })
@@ -208,13 +192,13 @@ export default function VisualizationPanel() {
       case 'matrix':
         items.push({
           id: structure.id,
-          title: `Matrix — ${structure.name}`,
+          title: `Matrix — ${structure.name}${label}`,
           activity: structure.activity,
           content: (
             <MatrixVisualizer
               name={structure.name}
               values={structure.values}
-              changes={changes}
+              changes={structureChanges}
             />
           ),
         })
@@ -223,13 +207,22 @@ export default function VisualizationPanel() {
       case 'linked-list':
         items.push({
           id: structure.id,
-          title: `Linked List — ${structure.name}`,
+          title: `Linked List — ${structure.name}${label}`,
           activity: structure.activity,
           content: (
             <LinkedListVisualizer
-              data={structure}
+              data={retainedStep === undefined ? structure : { ...structure, nodes: structure.nodes.map(node => ({ ...node, changed: false })) }}
             />
           ),
+        })
+        break
+
+      case 'binary-tree':
+        items.push({
+          id: structure.id,
+          title: `Binary Tree — ${structure.name}${label}`,
+          activity: structure.activity,
+          content: <BinaryTreeVisualizer data={retainedStep === undefined ? structure : { ...structure, nodes: structure.nodes.map(node => ({ ...node, changed: false })) }} />,
         })
         break
 
@@ -274,7 +267,8 @@ export default function VisualizationPanel() {
       content: (
         <RecursionTree
           tree={recursiveTree}
-          onSelectStep={setStep}
+          onSelectStep={seekFromVisualization}
+          topology={fullRecursiveTree}
         />
       ),
     })
@@ -282,21 +276,21 @@ export default function VisualizationPanel() {
 
   items.sort(
     (a, b) =>
-      (activityHistory.order.get(a.id) ??
+      (timeline.order.get(a.id) ??
         Number.MAX_SAFE_INTEGER) -
-      (activityHistory.order.get(b.id) ??
+      (timeline.order.get(b.id) ??
         Number.MAX_SAFE_INTEGER),
   )
 
   const activeId =
-    recursiveActivity
-      ? 'recursion'
-      : items.find(
-          item =>
-            item.id === activityHistory.activeId,
-        )?.id ??
-        items[0]?.id ??
-        null
+      recursiveActivity
+        ? 'recursion'
+        : items.find(
+            item =>
+              item.id === timelineFrame?.activeId,
+          )?.id ??
+          items[0]?.id ??
+          null
 
   return (
     <div className="visualization-layout adaptive-root">
@@ -349,9 +343,7 @@ export default function VisualizationPanel() {
         </div>
       )}
 
-      {/* Main multi-structure canvas */}
-
-      
+      {/* Main multi-structure canvas */}      
       <AdaptiveLayout
         key={`layout-${jobId}`}
         items={items}

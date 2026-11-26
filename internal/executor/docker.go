@@ -15,6 +15,7 @@ import (
 
 const (
 	executionTimeout = 5 * time.Second
+	traceExecutionTimeout = 20 * time.Second
 	cleanupTimeout   = 5 * time.Second
 
 	maxStdoutBytes = 1 * 1024 * 1024
@@ -210,9 +211,13 @@ func runContainer(
 		return containerResult{}, err
 	}
 
+	timeout := executionTimeout
+	if image == tracerImage {
+		timeout = traceExecutionTimeout
+	}
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		executionTimeout,
+		timeout,
 	)
 	defer cancel()
 

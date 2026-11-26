@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useExecutionStore } from '../store/executionStore'
 
 const BASE_DELAY = 700
+const SEEK_EVENT = 'algotrace:manual-seek'
+export function seekFromVisualization(step: number) {
+  window.dispatchEvent(new Event(SEEK_EVENT))
+  useExecutionStore.getState().setStep(step)
+}
 
 export const PLAYBACK_SPEEDS = [
   0.25,
@@ -41,6 +46,7 @@ export function usePlayback() {
   const [playingTrace, setPlayingTrace] =
     useState<typeof trace>(null)
 
+  const playingRef = useRef(false)
   const [speed, updateSpeed] = useState(1)
 
   const totalSteps = trace?.events.length ?? 0
@@ -83,8 +89,14 @@ export function usePlayback() {
   // ==========================================
 
   const pause = useCallback(() => {
+    playingRef.current = false
     setPlayingTrace(null)
   }, [])
+
+  useEffect(() => {
+    window.addEventListener(SEEK_EVENT, pause)
+    return () => window.removeEventListener(SEEK_EVENT, pause)
+  }, [pause])
 
   // ==========================================
   // PLAY
@@ -102,6 +114,7 @@ export function usePlayback() {
       setStep(0)
     }
 
+    playingRef.current = true
     setPlayingTrace(trace)
 
   }, [
@@ -199,6 +212,7 @@ export function usePlayback() {
       // Prevent stale execution updates.
 
       if (
+        !playingRef.current ||
         latestState.trace !== activeTrace ||
         latestState.jobId !== activeJobId ||
         latestState.isExecuting
@@ -223,6 +237,7 @@ export function usePlayback() {
       // Stop automatically after the final step.
 
       if (nextStep >= lastStep) {
+        playingRef.current = false
         setPlayingTrace(null)
       }
 

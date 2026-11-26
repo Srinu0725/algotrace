@@ -1,0 +1,2 @@
+.mode-focus .adaptive-card.is-focused { grid-column: 1 / -1; }
+.mode-focus .adaptive-card.is-pinned:not(.is-focused) { min-width: 0; }

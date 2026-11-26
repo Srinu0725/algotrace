@@ -1,8 +1,8 @@
-
 import sys
 import json
 import types
 import math
+import time
 from object_tracker import ObjectTracker
 
 # --------------------------------------------------
@@ -10,6 +10,7 @@ from object_tracker import ObjectTracker
 # --------------------------------------------------
 
 MAX_TRACE_STEPS = 10_000
+MAX_TRACE_SECONDS = 10.0
 MAX_CALL_DEPTH = 100
 
 MAX_VALUE_BYTES = 64 * 1024
@@ -270,6 +271,7 @@ def build_error(exception):
 
 def trace_execution(code):
 
+    deadline = time.monotonic() + MAX_TRACE_SECONDS
     events = []
     frame_states = {}
 
@@ -344,6 +346,10 @@ def trace_execution(code):
             return None
 
         if limit_reached is not None:
+            raise TraceLimitExceeded()
+
+        if time.monotonic() >= deadline:
+            limit_reached = "maximum_trace_time_exceeded"
             raise TraceLimitExceeded()
 
         if len(events) >= MAX_TRACE_STEPS:
@@ -467,126 +473,6 @@ def trace_execution(code):
                 "variables": current_variables,
                 "changes": changes
             }, frame)
-
-            frame_states.pop(frame_id, None)
-
-            if call_stack:
-                call_stack.pop()
-
-        return tracer
-
-        # ----------------------------------------------
-        # FUNCTION CALL
-        # ----------------------------------------------
-
-        if event == "call":
-
-            if len(call_stack) - 1 >= MAX_CALL_DEPTH:
-
-                limit_reached = "maximum_call_depth_exceeded"
-
-                raise TraceLimitExceeded()
-
-            frame_states[frame_id] = {}
-
-            call_stack.append(function_name)
-
-            record_event({
-                "step": len(events) + 1,
-                "line": frame.f_lineno,
-                "event": "function_call",
-                "function": function_name,
-                "depth": len(call_stack) - 1,
-                "call_stack": call_stack.copy(),
-                "arguments": capture_variables(frame)
-            },frame)
-
-            return tracer
-
-        # ----------------------------------------------
-        # LINE EXECUTION
-        # ----------------------------------------------
-
-        if event == "line":
-
-            previous_variables = frame_states.setdefault(
-                frame_id, {}
-            )
-
-            current_variables = capture_variables(frame)
-
-            changes = detect_changes(
-                previous_variables,
-                current_variables
-            )
-
-            record_event({
-                "step": len(events) + 1,
-                "line": frame.f_lineno,
-                "event": "line",
-                "function": function_name,
-                "depth": max(0, len(call_stack) - 1),
-                "call_stack": call_stack.copy(),
-                "variables": current_variables,
-                "changes": changes
-            })
-
-            frame_states[frame_id] = current_variables
-
-        # ----------------------------------------------
-        # EXCEPTION EVENT
-        # ----------------------------------------------
-
-        elif event == "exception":
-
-            exception_type, exception_value, _ = arg
-
-            current_variables = capture_variables(frame)
-
-            record_event({
-                "step": len(events) + 1,
-                "line": frame.f_lineno,
-                "event": "exception",
-                "function": function_name,
-                "depth": max(0, len(call_stack) - 1),
-                "call_stack": call_stack.copy(),
-                "variables": current_variables,
-                "exception": {
-                    "type": exception_type.__name__,
-                    "message": exception_message(
-                        exception_value
-                    )
-                }
-            })
-
-        # ----------------------------------------------
-        # FUNCTION RETURN
-        # ----------------------------------------------
-
-        elif event == "return":
-
-            previous_variables = frame_states.get(
-                frame_id, {}
-            )
-
-            current_variables = capture_variables(frame)
-
-            changes = detect_changes(
-                previous_variables,
-                current_variables
-            )
-
-            record_event({
-                "step": len(events) + 1,
-                "line": frame.f_lineno,
-                "event": "function_return",
-                "function": function_name,
-                "depth": max(0, len(call_stack) - 1),
-                "call_stack": call_stack.copy(),
-                "return_value": serialize_value(arg),
-                "variables": current_variables,
-                "changes": changes
-            })
 
             frame_states.pop(frame_id, None)
 

@@ -1,3 +1,4 @@
+import { detectBinaryTrees } from './binaryTreeDetector'
 import type {
   JsonValue,
   TraceEvent,
@@ -441,12 +442,18 @@ export function detectStructures(
   // LINKED LISTS
   // ========================================
 
+  for (const tree of detectBinaryTrees(event, previousEvent)) {
+    visualizations.push(tree)
+    for (const node of tree.nodes) consumedObjects.add(node.id)
+  }
+
   const linkedLists = detectLinkedLists(
     event,
     previousEvent,
   )
 
   for (const linkedList of linkedLists) {
+    if (linkedList.nodes.some(node => consumedObjects.has(node.id))) continue
     visualizations.push(linkedList)
 
     for (const node of linkedList.nodes) {

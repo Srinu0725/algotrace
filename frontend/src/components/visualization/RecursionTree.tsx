@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
   Network,
@@ -19,6 +19,7 @@ import {
 
 interface Props {
   tree: CallTreeState
+  topology?: CallTreeState
   onSelectStep: (step: number) => void
 }
 
@@ -117,13 +118,31 @@ function createLayout(tree: CallTreeState) {
 export default function RecursionTree({
   tree,
   onSelectStep,
+  topology,
 }: Props) {
   const [zoom, setZoom] = useState(1)
 
-  const layout = useMemo(
-    () => createLayout(tree),
-    [tree],
-  )
+  const canvas = useRef<HTMLDivElement>(null)
+  const [follow, setFollow] = useState(true)
+  const layoutTree = topology ?? tree
+  const fullLayout = useMemo(() => createLayout(layoutTree), [layoutTree])
+  const layout = useMemo(() => {
+    const current = new Map(tree.nodes.map(node => [node.id, node]))
+    return { ...fullLayout, nodes: fullLayout.nodes.flatMap(item => {
+      const node = current.get(item.node.id)
+      return node ? [{ ...item, node }] : []
+    }) }
+  }, [fullLayout, tree])
+  useLayoutEffect(() => {
+    const viewport = canvas.current
+    const active = layout.nodes.find(item => item.node.id === tree.activeId)
+    if (!follow || !viewport || !active) return
+    const left = (active.x - NODE_WIDTH / 2) * zoom
+    const top = active.y * zoom
+    if (left < viewport.scrollLeft || left + NODE_WIDTH * zoom > viewport.scrollLeft + viewport.clientWidth || top < viewport.scrollTop || top + NODE_HEIGHT * zoom > viewport.scrollTop + viewport.clientHeight) {
+      viewport.scrollTo({ left: Math.max(0, left - 20), top: Math.max(0, top - 20) })
+    }
+  }, [layout, tree.activeId, zoom, follow])
 
   const positions = new Map(
     layout.nodes.map(item => [
@@ -197,7 +216,11 @@ export default function RecursionTree({
         <span>{tree.stack.length} active</span>
       </div>
 
-      <div className="recursion-canvas">
+      <div className="recursion-zoom">
+        <button className="icon-button" onClick={() => setFollow(value => !value)}>{follow ? 'Follow on' : 'Follow off'}</button>
+        <button className="icon-button" onClick={() => { if (canvas.current) setZoom(Math.max(0.1, Math.min(1, canvas.current.clientWidth / layout.width, canvas.current.clientHeight / layout.height))) }}>Fit</button>
+      </div>
+      <div className="recursion-canvas" ref={canvas}>
         <svg
           width={layout.width * zoom}
           height={layout.height * zoom}

@@ -76,7 +76,25 @@ export interface RecursionVisualization
   functionName: string
 }
 
+export interface BinaryTreeNode {
+  id: string
+  value: JsonValue
+  left: string | null
+  right: string | null
+  changed: boolean
+}
+
+export interface BinaryTreeVisualization extends VisualizationBase {
+  type: 'binary-tree'
+  nodes: BinaryTreeNode[]
+  root: string
+  pointers: Record<string, string>
+  incomplete: boolean
+  irregular: boolean
+}
+
 export type VisualizationDescriptor =
+  | BinaryTreeVisualization
   | ArrayVisualization
   | MatrixVisualization
   | LinkedListVisualization

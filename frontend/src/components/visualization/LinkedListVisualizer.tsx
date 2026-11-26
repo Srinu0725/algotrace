@@ -1,4 +1,3 @@
-
 import { useId, useState } from 'react'
 
 import {
@@ -174,7 +173,9 @@ export default function LinkedListVisualizer({
                         : 'll-edge'
                     }
                     d={
-                      nextX > x
+                      nextX === x
+                        ? `M ${x + NODE_WIDTH} ${nodeY + 32} C ${x + NODE_WIDTH + 55} ${nodeY + 32}, ${x + NODE_WIDTH + 55} ${nodeY - 30}, ${x + NODE_WIDTH / 2} ${nodeY - 30} V ${nodeY}`
+                        : nextX > x
                         ? `M ${x + NODE_WIDTH}
                             ${nodeY + 32}
                             C ${x + NODE_WIDTH + 25}
@@ -265,7 +266,7 @@ export default function LinkedListVisualizer({
                   textAnchor="middle"
                 >
                   {value.length > 9
-                    ? `${value.slice(0, 8)}…`
+                    ? `${value.slice(0, 8)}â€¦`
                     : value}
                 </text>
 
@@ -316,7 +317,7 @@ export default function LinkedListVisualizer({
                   textAnchor="middle"
                 >
                   {label.length > 20
-                    ? `${label.slice(0, 19)}…`
+                    ? `${label.slice(0, 19)}â€¦`
                     : label}
                 </text>
 
@@ -332,11 +333,11 @@ export default function LinkedListVisualizer({
       </div>
 
       <div className="ll-legend">
-        <span>● Existing node</span>
+        <span>â— Existing node</span>
         <span className="ll-legend-changed">
-          ● Created / modified
+          â— Created / modified
         </span>
-        <span>→ Pointer</span>
+        <span>â†’ Pointer</span>
       </div>
     </section>
   )
