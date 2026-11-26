@@ -14,6 +14,9 @@ import CallStackVisualizer from './CallStackVisualizer'
 import PlaybackControls from '../playback/PlaybackControls'
 
 import { buildCallTree } from '../../utils/traceTree'
+import MatrixVisualizer from './MatrixVisualizer'
+
+import { isMatrix } from '../../utils/dataStructure'
 
 export default function VisualizationPanel() {
   const {
@@ -222,7 +225,34 @@ export default function VisualizationPanel() {
           />
         )}
 
-        {/* Array visualizations */}
+        {/* Automatic array and matrix visualization */}
+
+{arrayVariables.map(([name, value]) => {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  return (
+    <section
+      className="trace-card"
+      key={name}
+    >
+      {isMatrix(value) ? (
+        <MatrixVisualizer
+          name={name}
+          values={value}
+          changes={changes}
+        />
+      ) : (
+        <ArrayVisualizer
+          name={name}
+          values={value}
+          changes={changes}
+        />
+      )}
+    </section>
+  )
+})}
 
         {arrayVariables.map(([name, value]) => {
           if (!Array.isArray(value)) {
