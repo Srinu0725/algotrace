@@ -1,7 +1,7 @@
 
 import { useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
-
+import { Link } from 'react-router-dom'
 import {
   Code2,
   Play,
@@ -171,22 +171,30 @@ export default function Workspace() {
       {/* Main toolbar */}
 
       <header className="toolbar">
-        <div className="brand">
-          <div className="brand-icon">
-            <Code2 size={24} />
-          </div>
+        <Link
+            to="/"
+            className="brand"
+            style={{
+                textDecoration: 'none',
+                color: 'inherit',
+            }}
+            title="Back to AlgoTrace homepage"
+            >
+            <div className="brand-icon">
+                <Code2 size={24} />
+            </div>
 
-          <span>
-            Algo
-            <span className="brand-accent">
-              Trace
+            <span>
+                Algo
+                <span className="brand-accent">
+                Trace
+                </span>
             </span>
-          </span>
 
-          <span className="version">
-            v0.1
-          </span>
-        </div>
+            <span className="version">
+                v0.1
+            </span>
+            </Link>
 
         <div className="toolbar-actions">
           <span className="language-label">
