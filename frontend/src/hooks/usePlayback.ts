@@ -1,137 +1,309 @@
+import { useCallback, useEffect, useState } from 'react'
 
-import {
-  useEffect,
-  useState,
-} from 'react'
+import { useExecutionStore } from '../store/executionStore'
 
-import {
-  useExecutionStore,
-} from '../store/executionStore'
+const BASE_DELAY = 700
+
+export const PLAYBACK_SPEEDS = [
+  0.25,
+  0.5,
+  1,
+  1.5,
+  2,
+  4,
+] as const
 
 export function usePlayback() {
-  const [playing, setPlaying] =
-    useState(false)
+  // ==========================================
+  // EXECUTION STORE
+  // ==========================================
 
-  const [speed, setSpeed] =
-    useState(1)
+  const trace = useExecutionStore(state => state.trace)
 
-  const trace = useExecutionStore(
-    (state) => state.trace,
-  )
+  const jobId = useExecutionStore(state => state.jobId)
 
   const currentStep = useExecutionStore(
-    (state) => state.currentStep,
+    state => state.currentStep,
+  )
+
+  const isExecuting = useExecutionStore(
+    state => state.isExecuting,
   )
 
   const setStep = useExecutionStore(
-    (state) => state.setStep,
+    state => state.setStep,
   )
 
-  const totalSteps =
-    trace?.events.length ?? 0
+  // ==========================================
+  // PLAYBACK STATE
+  // ==========================================
+
+  const [playingTrace, setPlayingTrace] =
+    useState<typeof trace>(null)
+
+  const [speed, updateSpeed] = useState(1)
+
+  const totalSteps = trace?.events.length ?? 0
+
+  const lastStep = Math.max(0, totalSteps - 1)
+
+  const hasTrace = Boolean(trace) && totalSteps > 0
+
+  const isFirstStep = currentStep <= 0
+
+  const isLastStep = currentStep >= lastStep
+
+  const canPlay = hasTrace && !isExecuting
 
   const isPlaying =
-    playing &&
-    totalSteps > 0 &&
-    currentStep < totalSteps - 1
+    canPlay &&
+    playingTrace === trace &&
+    !isLastStep
 
-  useEffect(() => {
-    if (!isPlaying) return
+  const progress = totalSteps > 0
+    ? ((currentStep + 1) / totalSteps) * 100
+    : 0
 
-    const timer = window.setTimeout(() => {
-      const state =
-        useExecutionStore.getState()
+  // ==========================================
+  // SPEED CONTROL
+  // ==========================================
 
-      if (state.trace !== trace) {
-        setPlaying(false)
-        return
-      }
-
-      const lastStep =
-        (trace?.events.length ?? 1) - 1
-
-      const next = Math.min(
-        state.currentStep + 1,
-        lastStep,
-      )
-
-      state.setStep(next)
-
-      if (next >= lastStep) {
-        setPlaying(false)
-      }
-    }, 700 / speed)
-
-    return () => {
-      window.clearTimeout(timer)
+  const setSpeed = useCallback((value: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return
     }
-  }, [
-    isPlaying,
-    speed,
-    currentStep,
-    trace,
-  ])
 
-  function play() {
-    if (totalSteps < 2) return
+    updateSpeed(
+      Math.max(0.25, Math.min(4, value)),
+    )
+  }, [])
 
-    if (currentStep >= totalSteps - 1) {
+  // ==========================================
+  // PAUSE
+  // ==========================================
+
+  const pause = useCallback(() => {
+    setPlayingTrace(null)
+  }, [])
+
+  // ==========================================
+  // PLAY
+  // ==========================================
+
+  const play = useCallback(() => {
+    if (!canPlay || totalSteps <= 1) {
+      return
+    }
+
+    // Replay from the beginning if execution
+    // playback has already finished.
+
+    if (currentStep >= lastStep) {
       setStep(0)
     }
 
-    setPlaying(true)
-  }
+    setPlayingTrace(trace)
 
-  function pause() {
-    setPlaying(false)
-  }
+  }, [
+    canPlay,
+    totalSteps,
+    currentStep,
+    lastStep,
+    setStep,
+    trace,
+  ])
 
-  function togglePlayback() {
+  // ==========================================
+  // TOGGLE PLAYBACK
+  // ==========================================
+
+  const toggle = useCallback(() => {
     if (isPlaying) {
       pause()
     } else {
       play()
     }
-  }
+  }, [isPlaying, pause, play])
 
-  function seek(step: number) {
+  // ==========================================
+  // SEEK TO A SPECIFIC EXECUTION STEP
+  // ==========================================
+
+  const seek = useCallback((step: number) => {
+    if (!canPlay || !Number.isFinite(step)) {
+      return
+    }
+
     pause()
-    setStep(step)
-  }
 
-  function restart() {
-    pause()
-    setStep(0)
-  }
+    const nextStep = Math.max(
+      0,
+      Math.min(
+        lastStep,
+        Math.trunc(step),
+      ),
+    )
 
-  function next() {
+    setStep(nextStep)
+
+  }, [
+    canPlay,
+    lastStep,
+    pause,
+    setStep,
+  ])
+
+  // ==========================================
+  // MANUAL STEP NAVIGATION
+  // ==========================================
+
+  const next = useCallback(() => {
     seek(currentStep + 1)
-  }
+  }, [seek, currentStep])
 
-  function previous() {
+  const previous = useCallback(() => {
     seek(currentStep - 1)
-  }
+  }, [seek, currentStep])
 
-  function finish() {
-    seek(totalSteps - 1)
-  }
+  const restart = useCallback(() => {
+    seek(0)
+  }, [seek])
+
+  const finish = useCallback(() => {
+    seek(lastStep)
+  }, [seek, lastStep])
+
+  // ==========================================
+  // AUTOMATIC PLAYBACK ENGINE
+  // ==========================================
+
+  useEffect(() => {
+    if (!isPlaying || !trace || isExecuting) {
+      return
+    }
+
+    const delay = BASE_DELAY / speed
+
+    // Capture the execution identity so an old
+    // timer cannot update a newer execution.
+
+    const activeTrace = trace
+
+    const activeJobId = jobId
+
+    const timer = window.setTimeout(() => {
+
+      const latestState =
+        useExecutionStore.getState()
+
+      // Prevent stale execution updates.
+
+      if (
+        latestState.trace !== activeTrace ||
+        latestState.jobId !== activeJobId ||
+        latestState.isExecuting
+      ) {
+        return
+      }
+
+      // Prevent a scheduled timer from overriding
+      // a manually selected execution step.
+
+      if (latestState.currentStep !== currentStep) {
+        return
+      }
+
+      const nextStep = Math.min(
+        latestState.currentStep + 1,
+        lastStep,
+      )
+
+      latestState.setStep(nextStep)
+
+      // Stop automatically after the final step.
+
+      if (nextStep >= lastStep) {
+        setPlayingTrace(null)
+      }
+
+    }, delay)
+
+    // Cancel the previous timer whenever the step,
+    // speed, trace or playback state changes.
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+
+  }, [
+    isPlaying,
+    isExecuting,
+    trace,
+    jobId,
+    currentStep,
+    lastStep,
+    speed,
+  ])
+
+  // ==========================================
+  // PUBLIC PLAYBACK CONTROLS
+  // ==========================================
 
   return {
-    isPlaying,
-    speed,
-    setSpeed,
+    // Execution state
 
     currentStep,
     totalSteps,
+    lastStep,
+    hasTrace,
+    canPlay,
+    progress,
+
+    // Playback state
+
+    isPlaying,
+    playing: isPlaying,
+    speed,
+
+    // Boundary state
+
+    isFirstStep,
+    isLastStep,
+
+    canGoNext:
+      canPlay && !isLastStep,
+
+    canGoPrevious:
+      canPlay && !isFirstStep,
+
+    // Playback actions
 
     play,
     pause,
-    togglePlayback,
+    toggle,
+    togglePlayback: toggle,
+
+    // Speed control
+
+    setSpeed,
+    playbackSpeeds: PLAYBACK_SPEEDS,
+
+    // Navigation
 
     seek,
     restart,
+    finish,
     next,
     previous,
-    finish,
+
+    // Compatibility aliases
+
+    nextStep: next,
+    previousStep: previous,
+    goToStep: seek,
+    goToStart: restart,
+    goToEnd: finish,
   }
 }
+
+export default usePlayback

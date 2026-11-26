@@ -1,3 +1,4 @@
+
 import { useMemo } from 'react'
 
 import {
@@ -8,42 +9,135 @@ import {
 import { useExecutionStore } from '../../store/executionStore'
 
 import ArrayVisualizer from './ArrayVisualizer'
+import MatrixVisualizer from './MatrixVisualizer'
+import ObjectVisualizer from './ObjectVisualizer'
+import LinkedListVisualizer from './LinkedListVisualizer'
 import RecursionTree from './RecursionTree'
 import CallStackVisualizer from './CallStackVisualizer'
-import ObjectVisualizer from './ObjectVisualizer'
+import AdaptiveLayout from './AdaptiveLayout'
+
+import type {
+  VisualizationItem,
+} from './AdaptiveLayout'
+
 import PlaybackControls from '../playback/PlaybackControls'
 
-import { buildCallTree } from '../../utils/traceTree'
-import MatrixVisualizer from './MatrixVisualizer'
+import {
+  detectStructures,
+} from '../../utils/structureDetector'
 
-import { isMatrix } from '../../utils/dataStructure'
+import {
+  buildCallTree,
+} from '../../utils/traceTree'
+
+import {
+  extractRecursiveTree,
+} from '../../utils/recursiveCalls'
 
 export default function VisualizationPanel() {
-  const {
-    trace,
-    status,
-    error,
-    currentStep,
-    isExecuting,
-    jobId,
-    setStep,
-  } = useExecutionStore()
+  const trace = useExecutionStore(s => s.trace)
+  const jobId = useExecutionStore(s => s.jobId)
+  const status = useExecutionStore(s => s.status)
+  const error = useExecutionStore(s => s.error)
 
-  const events = trace?.events ?? []
+  const currentStep = useExecutionStore(
+    s => s.currentStep,
+  )
 
-  const event = events[currentStep]
+  const isExecuting = useExecutionStore(
+    s => s.isExecuting,
+  )
 
-  // Reconstruct function calls up to the current step.
+  const setStep = useExecutionStore(
+    s => s.setStep,
+  )
+
+  const event = isExecuting
+    ? undefined
+    : trace?.events[currentStep]
+
+  const previousEvent =
+    trace?.events[currentStep - 1]
+
+  const structures = useMemo(
+    () => event
+      ? detectStructures(event, previousEvent)
+      : [],
+    [event, previousEvent],
+  )
+
   const callTree = useMemo(
-    () =>
-      buildCallTree(
-        trace?.events ?? [],
-        currentStep,
-      ),
+    () => buildCallTree(
+      trace?.events ?? [],
+      currentStep,
+    ),
     [trace, currentStep],
   )
 
-  // Empty or loading state.
+  const recursiveTree = useMemo(
+    () => extractRecursiveTree(callTree),
+    [callTree],
+  )
+
+  // Calculate stable visualization order and
+  // the last meaningful activity at this step.
+  // This also works when seeking backwards.
+
+  const activityHistory = useMemo(() => {
+    const order = new Map<string, number>()
+
+    let activeId: string | null = null
+
+    if (!trace) {
+      return { order, activeId }
+    }
+
+    for (
+      let index = 0;
+      index <= currentStep;
+      index++
+    ) {
+      const current = trace.events[index]
+
+      if (!current) continue
+
+      const detected = detectStructures(
+        current,
+        trace.events[index - 1],
+      )
+
+      for (const structure of detected) {
+        if (!order.has(structure.id)) {
+          order.set(structure.id, order.size)
+        }
+      }
+
+      const changed = detected.filter(
+        structure =>
+          structure.activity !== 'unchanged',
+      )
+
+      const specialized = changed.filter(
+        structure => structure.type !== 'object',
+      )
+
+      const candidates =
+        specialized.length > 0
+          ? specialized
+          : changed
+
+      if (candidates.length > 0) {
+        activeId =
+          candidates.find(
+            item => item.id === activeId,
+          )?.id ??
+          candidates[0].id
+      }
+    }
+
+    return { order, activeId }
+  }, [trace, currentStep])
+
   if (!event) {
     return (
       <div className="visualization-panel">
@@ -57,28 +151,25 @@ export default function VisualizationPanel() {
 
               <h3>Executing your code</h3>
 
-              <p>
-                Generating execution trace...
-              </p>
+              <p>Generating execution trace...</p>
             </>
           ) : (
             <>
               <Workflow size={48} />
 
-              <h3>
-                {trace
-                  ? 'No execution steps available'
-                  : 'Ready to visualize'}
-              </h3>
+              <h3>Ready to visualize</h3>
 
               <p>
-                Write your Python code and click
-                Visualize to explore its execution.
+                Write Python code and click Visualize.
               </p>
 
-              {error && (
-                <p className="console-stderr">
-                  {error}
+              {error && <p>{error}</p>}
+
+              {trace?.error && (
+                <p>
+                  {trace.error.type}:
+                  {' '}
+                  {trace.error.message}
                 </p>
               )}
             </>
@@ -88,366 +179,253 @@ export default function VisualizationPanel() {
     )
   }
 
-  // Merge arguments and local variables.
   const variables = {
-    ...event.arguments,
-    ...event.variables,
+    ...(event.arguments ?? {}),
+    ...(event.variables ?? {}),
   }
 
   const changes = event.changes ?? []
 
-  const changedVariables = new Set(
-    changes.map(change => change.name),
-  )
+  const items: VisualizationItem[] = []
 
-  const arrayVariables = Object.entries(
-    variables,
-  ).filter(([, value]) => Array.isArray(value))
+  for (const structure of structures) {
+    switch (structure.type) {
+      case 'array':
+        items.push({
+          id: structure.id,
+          title: `Array — ${structure.name}`,
+          activity: structure.activity,
+          content: (
+            <ArrayVisualizer
+              name={structure.name}
+              values={structure.values}
+              changes={changes}
+            />
+          ),
+        })
+        break
 
-  const scalarVariables = Object.entries(
-    variables,
-  ).filter(([, value]) => !Array.isArray(value))
+      case 'matrix':
+        items.push({
+          id: structure.id,
+          title: `Matrix — ${structure.name}`,
+          activity: structure.activity,
+          content: (
+            <MatrixVisualizer
+              name={structure.name}
+              values={structure.values}
+              changes={changes}
+            />
+          ),
+        })
+        break
 
-  return (
-    <div className="visualization-layout">
-      <div className="trace-workspace">
+      case 'linked-list':
+        items.push({
+          id: structure.id,
+          title: `Linked List — ${structure.name}`,
+          activity: structure.activity,
+          content: (
+            <LinkedListVisualizer
+              data={structure}
+            />
+          ),
+        })
+        break
 
-        {/* Execution summary */}
-
-        <div className="trace-summary">
-          <div>
-            <h3>Execution Trace</h3>
-
-            <p>
-              {events.length} execution steps
-            </p>
-          </div>
-
-          <span className="trace-status">
-            {status.replaceAll('_', ' ')}
-          </span>
-        </div>
-
-        {/* Execution errors */}
-
-        {error && (
-          <section className="trace-card">
-            <h3>Execution Error</h3>
-
-            <pre className="console-stderr">
-              {error}
-            </pre>
-          </section>
-        )}
-
-        {trace?.error && (
-          <section className="trace-card">
-            <h3>{trace.error.type}</h3>
-
-            <pre className="console-stderr">
-              {trace.error.message}
-            </pre>
-
-            {trace.error.line != null && (
-              <p>
-                Source line: {trace.error.line}
-              </p>
-            )}
-          </section>
-        )}
-
-        {trace?.limit && (
-          <section className="trace-card">
-            <h3>Execution Limit Reached</h3>
-
-            <p>{trace.limit}</p>
-          </section>
-        )}
-
-        {/* Current execution state */}
-
-        <section className="trace-card">
-          <h3>Execution State</h3>
-
-          <div className="execution-state-grid">
-            <div>
-              <span>Step</span>
-
-              <strong>
-                {currentStep + 1}/{events.length}
-              </strong>
-            </div>
-
-            <div>
-              <span>Source Line</span>
-
-              <strong>{event.line}</strong>
-            </div>
-
-            <div>
-              <span>Event</span>
-
-              <strong>
-                {event.event.replaceAll('_', ' ')}
-              </strong>
-            </div>
-
-            <div>
-              <span>Depth</span>
-
-              <strong>{event.depth}</strong>
-            </div>
-          </div>
-
-          {event.event === 'line' && (
-            <p className="trace-event-note">
-              Next line to execute: {event.line}.
-              Showing state before execution.
-            </p>
-          )}
-        </section>
-
-        {/* NEW: Function call tree */}
-
-        {callTree.nodes.length > 0 && (
-          <RecursionTree
-            key={jobId}
-            tree={callTree}
-            onSelectStep={setStep}
-          />
-        )}
-
-        {/* NEW: Dynamic call stack */}
-
-        {callTree.nodes.length > 0 && (
-          <CallStackVisualizer
-            tree={callTree}
-          />
-        )}
-
-        {/* Object Identity and Reference Visualization */}
-
-        {(event.objects || event.objects_truncated) && (
-          <ObjectVisualizer
-            key={jobId}
-            references={event.references ?? {}}
-            objects={event.objects ?? {}}
-            previousReferences={
-              events[currentStep - 1]?.references
-            }
-            previousObjects={
-              events[currentStep - 1]?.objects
-            }
-            truncated={event.objects_truncated}
-          />
-        )}
-
-        {/* Automatic array and matrix visualization */}
-
-{arrayVariables.map(([name, value]) => {
-  if (!Array.isArray(value)) {
-    return null
+      case 'object':
+        items.push({
+          id: structure.id,
+          title: 'Object References',
+          activity: structure.activity,
+          content: (
+            <ObjectVisualizer
+              objects={structure.objects}
+              references={structure.references}
+              previousObjects={
+                previousEvent?.objects ?? {}
+              }
+              previousReferences={
+                previousEvent?.references ?? {}
+              }
+              truncated={structure.truncated}
+            />
+          ),
+        })
+        break
+    }
   }
 
-  return (
-    <section
-      className="trace-card"
-      key={name}
-    >
-      {isMatrix(value) ? (
-        <MatrixVisualizer
-          name={name}
-          values={value}
-          changes={changes}
+  const recursiveActivity =
+    recursiveTree.nodes.some(
+      node =>
+        node.callStep === currentStep ||
+        node.returnStep === currentStep,
+    )
+
+  if (recursiveTree.nodes.length > 0) {
+    items.push({
+      id: 'recursion',
+      title: 'Recursion Tree',
+      activity: recursiveActivity
+        ? 'active'
+        : 'unchanged',
+
+      content: (
+        <RecursionTree
+          tree={recursiveTree}
+          onSelectStep={setStep}
         />
-      ) : (
-        <ArrayVisualizer
-          name={name}
-          values={value}
-          changes={changes}
-        />
-      )}
-    </section>
+      ),
+    })
+  }
+
+  items.sort(
+    (a, b) =>
+      (activityHistory.order.get(a.id) ??
+        Number.MAX_SAFE_INTEGER) -
+      (activityHistory.order.get(b.id) ??
+        Number.MAX_SAFE_INTEGER),
   )
-})}
 
-        {arrayVariables.map(([name, value]) => {
-          if (!Array.isArray(value)) {
-            return null
-          }
+  const activeId =
+    recursiveActivity
+      ? 'recursion'
+      : items.find(
+          item =>
+            item.id === activityHistory.activeId,
+        )?.id ??
+        items[0]?.id ??
+        null
 
-          return (
-            <section
-              className="trace-card"
-              key={name}
-            >
-              <ArrayVisualizer
-                name={name}
-                values={value}
-                changes={changes}
-              />
-            </section>
-          )
-        })}
+  return (
+    <div className="visualization-layout adaptive-root">
+      {/* Compact fixed execution information */}
 
-        {/* Scalar variables */}
+      <div className="adaptive-execution-header">
+        <div>
+          <span>Step</span>
+          <strong>
+            {currentStep + 1}/{trace?.events.length}
+          </strong>
+        </div>
 
-        {scalarVariables.length > 0 && (
-          <section className="trace-card">
-            <h3>Variables</h3>
+        <div>
+          <span>Line</span>
+          <strong>{event.line}</strong>
+        </div>
 
-            <div className="variable-grid">
-              {scalarVariables.map(
-                ([name, value]) => (
-                  <div
-                    key={name}
-                    className={`variable-tile ${
-                      changedVariables.has(name)
-                        ? 'variable-changed'
-                        : ''
-                    }`}
-                  >
-                    <span>{name}</span>
+        <div>
+          <span>Depth</span>
+          <strong>{event.depth}</strong>
+        </div>
 
-                    <code>
-                      {JSON.stringify(value)}
-                    </code>
-                  </div>
-                ),
-              )}
-            </div>
-          </section>
-        )}
+        <div>
+          <span>Event</span>
+          <strong>
+            {event.event.replaceAll('_', ' ')}
+          </strong>
+        </div>
 
-        {/* Basic stack fallback */}
+        <div>
+          <span>Status</span>
+          <strong>{status}</strong>
+        </div>
+      </div>
 
-        {callTree.nodes.length === 0 && (
-          <section className="trace-card">
-            <h3>Call Stack</h3>
+      {(error || trace?.error || event.exception) && (
+        <div className="adaptive-error">
+          {event.exception
+            ? `${event.exception.type}: ${event.exception.message}`
+            : trace?.error
+              ? `${trace.error.type}: ${trace.error.message}`
+              : error}
+        </div>
+      )}
 
-            <div className="trace-details">
-              <span>Current Function</span>
+      {trace?.limit && (
+        <div className="adaptive-error">
+          Trace limit: {trace.limit}
+        </div>
+      )}
 
-              <strong>{event.function}</strong>
-            </div>
+      {/* Main multi-structure canvas */}
 
-            {(event.call_stack ?? []).map(
-              (frame, index) => (
+      
+      <AdaptiveLayout
+        key={`layout-${jobId}`}
+        items={items}
+        activeId={activeId}
+      />
+
+      {/* Collapsible execution inspector */}
+
+      <details className="adaptive-inspector">
+        <summary>
+          Variables &amp; Call Stack
+          <span>
+            {Object.keys(variables).length} variables
+          </span>
+        </summary>
+
+        <div className="adaptive-inspector-content">
+          <div className="variable-grid">
+            {Object.entries(variables).map(
+              ([name, value]) => (
                 <div
-                  className="stack-frame"
-                  key={`${frame}-${index}`}
+                  key={name}
+                  className={
+                    changes.some(
+                      change => change.name === name,
+                    )
+                      ? 'variable-tile variable-changed'
+                      : 'variable-tile'
+                  }
                 >
-                  {frame}
+                  <strong>{name}</strong>
+
+                  <code>
+                    {JSON.stringify(value)}
+                  </code>
                 </div>
               ),
             )}
-          </section>
-        )}
+          </div>
 
-        {/* Variable changes */}
+          {callTree.nodes.length > 0 && (
+            <CallStackVisualizer tree={callTree} />
+          )}
 
-        {changes.length > 0 && (
-          <section className="trace-card">
-            <h3>Variable Changes</h3>
-
-            {changes.map((change, index) => (
-              <div
-                className="variable-change-row"
-                key={`${change.name}-${index}`}
-              >
-                <div>
-                  <strong>{change.name}</strong>
-
-                  <span>
-                    {change.type.replaceAll(
-                      '_',
-                      ' ',
-                    )}
-                  </span>
-                </div>
-
-                {change.old_value !== undefined && (
-                  <div>
-                    <span>Previous</span>
-
-                    <code>
-                      {JSON.stringify(
-                        change.old_value,
-                      )}
-                    </code>
-                  </div>
-                )}
-
-                {change.new_value !== undefined && (
-                  <div>
-                    <span>Current</span>
-
-                    <code>
-                      {JSON.stringify(
-                        change.new_value,
-                      )}
-                    </code>
-                  </div>
-                )}
-
-                {change.value !== undefined && (
-                  <div>
-                    <span>Value</span>
-
-                    <code>
-                      {JSON.stringify(
-                        change.value,
-                      )}
-                    </code>
-                  </div>
-                )}
+          {event.return_value !== undefined &&
+            event.function !== '<module>' && (
+              <div className="adaptive-return">
+                Return value:
+                {' '}
+                <code>
+                  {JSON.stringify(event.return_value)}
+                </code>
               </div>
-            ))}
-          </section>
-        )}
+            )}
 
-        {/* Function return value */}
+          {changes.length > 0 && (
+            <div className="adaptive-changes">
+              <strong>Variable changes</strong>
 
-        {event.return_value !== undefined && (
-          <section className="trace-card">
-            <h3>Return Value</h3>
-
-            <pre className="trace-json">
-              {JSON.stringify(
-                event.return_value,
-                null,
-                2,
-              )}
-            </pre>
-          </section>
-        )}
-
-        {/* Exception information */}
-
-        {event.exception && (
-          <section className="trace-card">
-            <h3>Exception</h3>
-
-            <div className="trace-details">
-              <span>Type</span>
-
-              <strong>
-                {event.exception.type}
-              </strong>
-
-              <span>Message</span>
-
-              <strong className="console-stderr">
-                {event.exception.message}
-              </strong>
+              {changes.map((change, index) => (
+                <div key={`${change.name}-${index}`}>
+                  <code>{change.name}</code>
+                  {' — '}
+                  {change.type.replaceAll('_', ' ')}
+                </div>
+              ))}
             </div>
-          </section>
-        )}
-      </div>
+          )}
+        </div>
+      </details>
 
-      {/* Fixed playback controls */}
+      {/* Always accessible playback controls */}
 
-      <PlaybackControls key={jobId} />
+      <PlaybackControls key={`playback-${jobId}`} />
     </div>
   )
 }
